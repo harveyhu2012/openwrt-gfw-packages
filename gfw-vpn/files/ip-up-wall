@@ -25,6 +25,7 @@ prepare_rule() {
 	local interface=$1
 	ip route del default via $PPP_REMOTE
 
+	# 国内网段的ip区域加入到ipset中
 	CHKIPSET=$(ipset -L whitezone | wc -l)
 	if [ "$CHKIPSET" == "0" ]; then
 		ipset -N whitezone nethash --hashsize 32768
@@ -35,6 +36,7 @@ prepare_rule() {
 		done
 	fi
 
+	# 自定义的ip白名单加入ipset中
 	CHKIPSET=$(ipset -L whiteip | wc -l)
 	if [ "$CHKIPSET" == "0" ]; then
 		ipset -N whiteip iphash --hashsize 128
@@ -44,6 +46,7 @@ prepare_rule() {
 		done
 	fi
 
+	# 查询VPN interface名字？
 	CHKIPROUTE=$(grep gfw$interface /etc/iproute2/rt_tables | cut -f1)
 	if [ -z "$CHKIPROUTE" ]; then
 		for i in $(seq 101 250) ; do
@@ -56,16 +59,22 @@ prepare_rule() {
 		done
 	fi
 	mark=$CHKIPROUTE
-
+	
+	# 临时文件
 	tmprulefile=$rulefile.gfw$interface.tmp
 
+	# 新建一个链（gfwVPN）
 	echo "iptables -t mangle -N gfw$interface 2>/dev/null" >> $tmprulefile
+	# 清空这个链上的规则
 	echo "iptables -t mangle -F gfw$interface" >> $tmprulefile
+	# 所有源地址不在白名单的（或者？) 目的地址不在白名单的跳转到gfwVPN链上
 	echo "iptables -t mangle -I PREROUTING -m set ! --match-set whiteip src -m set ! --match-set whiteip dst -m set ! --match-set whitezone dst -j gfw$interface" >> $tmprulefile
 	echo "iptables -t mangle -I OUTPUT -m set ! --match-set whiteip src -m set ! --match-set whiteip dst -m set ! --match-set whitezone dst -j gfw$interface" >> $tmprulefile
 	echo "iptables -t mangle -I FORWARD -m set ! --match-set whiteip src -m set ! --match-set whiteip dst -m set ! --match-set whitezone dst -j gfw$interface" >> $tmprulefile
-
+	
+	# 新建走VPN的路由表
 	ip route add table gfw$interface default via $PPP_LOCAL
+	# 打上标记（标记在下面有说明）的走VPN路由表
 	ip rule add fwmark $mark table gfw$interface priority $mark
 
 	inited=1
@@ -82,11 +91,13 @@ handle_rule() {
 	realif=$(uci_get_state network "$interface" ifname "$interface")
 	if [ "$PPP_IFACE" == "$realif" ]; then
 		prepare_rule $interface
+		# 符合协议和端口的打上标记（也就是说，要同时满足1、不在白名单和2、协议、端口与指定的一致的情况下，才会打上标记）
 		echo "iptables -t mangle -I gfw$interface -p $proto --dport $port -j MARK --set-mark $mark" >> $tmprulefile
 	fi
 }
 
 ip_up_wall() {
+	# 为每种规则（包括：interface,协议，端口）建一组ipset过滤
 	config_foreach handle_rule rule
 
 	if [ -z "$tmprulefile" ]; then

@@ -45,6 +45,12 @@ prepare_rule() {
 			ipset -A whiteip $IP
 		done
 	fi
+	# 将服务器ip加入白名单
+	local servername
+	local serverip	
+	servername=$(uci_get_state network "$interface" server "$interface")
+	serverip=$(nslookup $servername | tail -n 1 | awk '/Address/ { print $3 }')
+	[ -n "$serverip" ] && ipset -A whiteip $serverip 2>/dev/null
 
 	# 查询VPN interface名字？
 	CHKIPROUTE=$(grep gfw$interface /etc/iproute2/rt_tables | cut -f1)
@@ -73,7 +79,8 @@ prepare_rule() {
 	echo "iptables -t mangle -I FORWARD -m set ! --match-set whiteip src -m set ! --match-set whiteip dst -m set ! --match-set whitezone dst -j gfw$interface" >> $tmprulefile
 	
 	# 新建走VPN的路由表
-	ip route add table gfw$interface default via $PPP_LOCAL
+	ip route add table gfw$interface default via $PPP_REMOTE
+	
 	# 打上标记（标记在下面有说明）的走VPN路由表
 	ip rule add fwmark $mark table gfw$interface priority $mark
 

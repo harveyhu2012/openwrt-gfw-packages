@@ -32,7 +32,7 @@ delete_rule() {
 	sed -i "/gfw$interface\$/d" $rulefile
 	sed -i "/gfw$interface /d" $rulefile
 
-	ip route del table gfw$interface default
+	ip route flush table gfw$interface 2>/dev/null
 	ip rule del priority $mark
 
 	deleted=1
